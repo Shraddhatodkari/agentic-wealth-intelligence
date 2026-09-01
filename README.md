@@ -15,8 +15,7 @@ API with persistence, Redis-ready caching, an async job queue, Prometheus
 metrics, OpenTelemetry tracing, downloadable reports, a real SEC EDGAR
 integration, and a full interactive dashboard.
 
-**Docker and Kubernetes are not required by the application, CI pipeline, or deployment architecture.** - locally, in CI, or
-in cloud deployment. Everything runs as plain Python processes.
+**Docker and Kubernetes are not required by the application, CI pipeline, or deployment architecture.** Everything runs as plain Python processes.
 
 Built to demonstrate agentic orchestration (LangGraph), retrieval-augmented
 generation (ChromaDB), schema-enforced LLM outputs (Pydantic), and the
