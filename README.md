@@ -24,11 +24,8 @@ production-engineering discipline (auth, RBAC, retries, caching, async
 jobs, observability, CI quality gates) that separates a working demo
 from a deployable service.
 
-> **Note on the sample data:** this repo ships with filings for
-> "Nimbus Dynamics, Inc." â€” a fictional company created for
-> demonstration purposes, not a real business. Real SEC EDGAR
-> integration code is included and tested (see below) but doesn't ship
-> any real company's filing text in this repo.
+> **Data note:** The application supports real SEC EDGAR filings for live analysis. Synthetic filings are retained only as offline test fixtures and evaluation inputs; they are not presented as live investment data.
+
 
 ## Table of contents
 
@@ -74,44 +71,39 @@ learning loop â€” no weights update automatically â€” and that distinc
 is documented explicitly rather than implied away (see
 `docs/TECH_DECISIONS.md`).
 
-**Multi-company portfolio intelligence.** Given several companies'
-filings, `PortfolioAgent` ranks them by growth (average revenue YoY %),
-legal/regulatory risk (severity-weighted), and debt exposure (covenant
-non-compliance) â€” computed deterministically from each company's
-extraction, not re-derived by another LLM call, so the rankings are
-reproducible and auditable. The one LLM-generated piece is a sector-level
-narrative. In the bundled demo (Nimbus Dynamics, Solara Energy, Vantage
-Robotics), three different companies top three different rankings â€”
-a genuine demonstration that growth, legal risk, and debt risk are
-distinct dimensions a portfolio view needs to separate, not one blended
-score.
-
+**Multi-company portfolio intelligence.** Given multiple company filings, `PortfolioAgent` ranks companies by revenue growth, legal/regulatory risk, and debt exposure. Rankings are computed deterministically from extracted evidence for reproducibility and auditability, while the LLM is used for the sector-level narrative.
 ## Architecture
 
 ```mermaid
-flowchart TD
-    Real["Real SEC EDGAR<br/>(via ticker)"] -.-> B1
-    A1["FY2024 10-K"] --> B1["Ingestion agent"]
-    A2["FY2025 10-K"] --> B2["Ingestion agent"]
-    B1 --> C1["Extraction agent"]
-    B2 --> C2["Extraction agent"]
-    C2 --> D["RAG agent<br/>Indexes chunks in ChromaDB"]
-    D --> E["Ad-hoc Q&A"]
-    C2 --> F["Synthesis agent<br/>Executive risk memo"]
-    C1 --> G["Comparison agent<br/>Year-over-year trend synthesis"]
-    C2 --> G
-    C1 --> H["Evaluation harness<br/>Accuracy vs. ground truth"]
-    C2 --> H
-    F --> API["FastAPI service<br/>RBAC + rate limiting + caching + tracing + metrics"]
-    G --> API
-    H --> API
-    E --> API
-    API --> Queue["Celery + Redis<br/>async job queue"]
-    API --> DB[("SQLite/Postgres<br/>reports + audit log")]
-    API --> Export["Export: Markdown / PDF / DOCX"]
-    API --> UI["Streamlit dashboard"]
-    API --> Prom["Prometheus + Grafana"]
-    API --> Deploy["Procfile + buildpack deploy<br/>(Render/Railway, no Docker)"]
+flowchart LR
+    U["Analyst / User"] --> UI["Streamlit Dashboard"]
+    U --> API["FastAPI API<br/>Auth + RBAC + Rate Limits"]
+
+    API --> SEC["SEC EDGAR<br/>Real 10-K Filing"]
+    SEC --> ING["Ingestion Agent"]
+    ING --> EXT["Extraction Agent<br/>Pydantic Schemas"]
+
+    EXT --> RAG["RAG Agent<br/>ChromaDB"]
+    EXT --> SYN["Synthesis Agent"]
+    RAG --> QA["Analyst Q&A"]
+    SYN --> GOV["Confidence +<br/>Human Review"]
+
+    EXT --> CMP["Comparison Agent<br/>YoY Analysis"]
+    EXT --> PORT["Portfolio Agent<br/>Growth / Legal / Debt"]
+
+    SYN --> DB[("SQLite / PostgreSQL")]
+    CMP --> DB
+    PORT --> DB
+    GOV --> DB
+
+    API --> JOB["Celery + Redis<br/>Async Jobs"]
+    API --> EXP["Markdown / PDF / DOCX"]
+    API --> OBS["Prometheus +<br/>OpenTelemetry"]
+
+    LLM["Ollama<br/>Local LLM"] --> EXT
+    LLM --> SYN
+    LLM --> RAG
+    LLM --> PORT
 ```
 
 | # | Component | Responsibility |
@@ -143,7 +135,7 @@ corrupting downstream state.
 | **LangChain** (`langchain-text-splitters`) | Document chunking | `RecursiveCharacterTextSplitter` for overlap-aware chunking |
 | **ChromaDB** | Vector store (RAG) | Embedded, no external service required |
 | **Pydantic / pydantic-settings** | Structured contracts + config | Forces LLM responses into validated schemas; typed, env-driven settings |
-| **Google Gemini 3.6 Flash / Ollama** | LLM | `LLM_MODE=mock\|live\|ollama` â€” Gemini for cloud, Ollama for a fully local model with no API key |
+| **Ollama** | Local LLM | Local model inference for live financial analysis; mock mode remains available for offline tests |
 | **requests** | Real SEC EDGAR client | Genuine HTTP calls to SEC's public APIs, tested via mocked responses |
 | **FastAPI** | REST API | Async, Pydantic-native request/response validation, automatic OpenAPI docs |
 | **tenacity** | Retry logic | Exponential backoff on transient LLM call failures |
@@ -335,9 +327,9 @@ locust -f loadtest/locustfile.py --host http://localhost:8000 \
 export LLM_MODE=ollama
 python run_demo.py
 
-# Live mode (real Gemini calls)
-export LLM_MODE=live
-export GEMINI_API_KEY=your-key-here
+# Live local LLM mode via Ollama
+# Start Ollama and ensure the configured model is available, then:
+$env:LLM_MODE="ollama"
 python run_demo.py
 
 # Real SEC EDGAR fetch (requires network + SEC_USER_AGENT)
@@ -386,7 +378,7 @@ Interactive docs auto-generated at `/docs` once running (`make api`).
 curl -X POST http://localhost:8000/analyze \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-local-key" \
-  -d '{"company": "Nimbus Dynamics, Inc.", "fiscal_year": "FY2025"}'
+  -d '{"company": "Apple Inc.", "fiscal_year": "FY2025"}'
 ```
 
 Configure roles via `API_KEYS="key1:admin,key2:analyst,key3:viewer"`.
@@ -395,15 +387,16 @@ role return `403`; requests exceeding the rate limit return `429`.
 
 ## Dashboard
 
-`streamlit run app.py` launches a full dashboard with an executive KPI
-bar (total reports, memos, comparisons, evaluations, companies covered)
-and six tabs: **ðŸ” Analyze** (with live confidence/approval-status
-badges), **ðŸ“ˆ Compare Years**, **ðŸ¢ Portfolio** (cross-company rankings +
-chart), **ðŸ§‘â€âš-ï¸ Pending Review** (the human reviewer queue â€” approve/reject
-with an editable recommendation), **âœ… Evaluate**, **ðŸ-‚ï¸ Report History** â€”
-charts, ad-hoc Q&A, Markdown/PDF/DOCX downloads, all backed by the same
-database the API uses.
+`streamlit run app.py` launches the full interactive dashboard with executive KPIs and six core workflows:
 
+- **Analyze** - live filing analysis with confidence and approval status
+- **Compare Years** - year-over-year financial and risk trends
+- **Portfolio** - cross-company growth, legal-risk, and debt analysis
+- **Pending Review** - human approval and recommendation workflow
+- **Evaluate** - extraction accuracy against labeled ground truth
+- **Report History** - persisted reports, charts, Q&A, and Markdown/PDF/DOCX exports
+
+All dashboard workflows use the same application services and persistence layer as the REST API.
 ## Observability
 
 - **Metrics** â€” `/metrics` (Prometheus format): HTTP request rate/latency
@@ -477,7 +470,5 @@ no Docker): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ## License
 
 MIT â€” see [LICENSE](LICENSE).
-
-
 
 
