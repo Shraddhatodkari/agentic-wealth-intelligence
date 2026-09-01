@@ -298,7 +298,7 @@ agentic-wealth-intelligence/
 
 ## Running it
 
-**No Docker required for any of this.**
+**Docker is not required for any of this.**
 
 ```bash
 git clone https://github.com/Shraddhatodkari/agentic-wealth-intelligence.git
