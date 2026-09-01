@@ -470,6 +470,3 @@ no Docker): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ## License
 
 MIT - see [LICENSE](LICENSE).
-
-
-
