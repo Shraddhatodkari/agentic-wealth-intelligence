@@ -462,9 +462,7 @@ no Docker): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Trace/log visualization needs a hosted service (e.g. Grafana Cloud) -
   the instrumentation feeding it is real, the visualization backend
   isn't included, by choice, to avoid a Docker dependency
-- `google-generativeai` (the Gemini SDK used here) is now deprecated in
-  favor of `google-genai` - functionally unaffected today, worth
-  migrating in a future pass
+- Gemini support uses the `google.genai` client; Ollama remains the intended local inference mode
 
 ## License
 
