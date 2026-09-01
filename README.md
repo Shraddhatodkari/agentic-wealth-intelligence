@@ -15,7 +15,7 @@ API with persistence, Redis-ready caching, an async job queue, Prometheus
 metrics, OpenTelemetry tracing, downloadable reports, a real SEC EDGAR
 integration, and a full interactive dashboard.
 
-**No Docker or Kubernetes anywhere in this project** - locally, in CI, or
+**Docker and Kubernetes are not required by the application, CI pipeline, or deployment architecture.** - locally, in CI, or
 in cloud deployment. Everything runs as plain Python processes.
 
 Built to demonstrate agentic orchestration (LangGraph), retrieval-augmented
@@ -227,7 +227,7 @@ See [`.github/workflows/`](.github/workflows/).
   default; Redis when you need cache state shared across instances.
 - **Async jobs use a real queue, not FastAPI BackgroundTasks.** Celery +
   Redis survives process restarts and scales workers independently.
-- **No Docker or Kubernetes.** Deployment uses `Procfile` + a buildpack
+- **Docker and Kubernetes are not required.** Deployment uses `Procfile` + a buildpack
   host (Render/Railway) instead - see `docs/TECH_DECISIONS.md` for why,
   including a very practical reason (Docker Desktop caused real machine
   instability during development).
@@ -439,7 +439,7 @@ Every item from the enterprise-upgrade roadmap, status as of this build:
 | Centralized logging | **Structured JSON logs done** (the input a log aggregator needs); aggregation itself not included - a hosted option (Grafana Cloud Loki) is the no-Docker path |
 | Auth/RBAC | **Done.** API-key based, 3-tier role hierarchy (viewer/analyst/admin), not JWT |
 | Persistent storage | **Done.** SQLite by default, Postgres via one env var; full report + audit history, plus reviewer feedback records |
-| Load testing | **Done, actually run.** Locust load test - real recorded results in `loadtest/RESULTS.md`, including a rate-limiter-triggered `429` finding |
+| Load testing | **Completed with Locust.** A 15-concurrent-user local benchmark is recorded in `loadtest/RESULTS.md`, including a rate-limiter-triggered `429` finding |
 | Docker/Kubernetes | **Deliberately not used.** See `docs/TECH_DECISIONS.md` for why - deployment uses `Procfile` + a buildpack host instead |
 
 ## Deployment
