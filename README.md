@@ -1,4 +1,4 @@
-# Agentic Wealth Intelligence
+﻿# Agentic Wealth Intelligence
 
 ![Tests](https://github.com/Shraddhatodkari/agentic-wealth-intelligence/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
@@ -240,60 +240,60 @@ See [`.github/workflows/`](.github/workflows/).
 
 ```
 agentic-wealth-intelligence/
-|œ|€|€ .github/workflows/
-|‚   |œ|€|€ tests.yml                 # CI: lint, format, security scan, tests, coverage
-|‚   |”|€|€ deploy.yml                # CD template: deploys to Render after tests pass
-|œ|€|€ monitoring/
-|‚   |œ|€|€ prometheus.yml            # Scrape config (usable with a native or hosted Prometheus)
-|‚   |”|€|€ grafana/
-|‚       |œ|€|€ dashboards/awi-operations.json
-|‚       |”|€|€ provisioning/         # Auto-configured datasource + dashboard
-|œ|€|€ loadtest/
-|‚   |œ|€|€ locustfile.py             # Load test definitions
-|‚   |”|€|€ RESULTS.md                # Real recorded benchmark runs
-|œ|€|€ src/
-|‚   |œ|€|€ config.py                 # Centralized, typed settings (env-driven)
-|‚   |œ|€|€ logging_config.py         # Structured JSON logging
-|‚   |œ|€|€ tracing.py                # OpenTelemetry span instrumentation
-|‚   |œ|€|€ metrics.py                # Prometheus metrics (HTTP + per-agent-stage)
-|‚   |œ|€|€ db.py                     # SQLAlchemy persistence (reports + audit log)
-|‚   |œ|€|€ cache.py                  # Pluggable cache backend (memory | Redis)
-|‚   |œ|€|€ tasks.py                  # Celery async job definitions
-|‚   |œ|€|€ edgar_client.py           # Real SEC EDGAR API client (mocked in tests)
-|‚   |œ|€|€ report_export.py          # Markdown / PDF / DOCX export
-|‚   |œ|€|€ approval_workflow.py      # Human-in-the-loop confidence-based routing
-|‚   |œ|€|€ portfolio_agent.py        # Cross-company growth/risk/debt ranking + narrative
-|‚   |œ|€|€ schemas.py                # Pydantic contracts for all agent/report outputs
-|‚   |œ|€|€ llm_client.py             # Gemini/Ollama wrapper, mock/live modes, retry logic
-|‚   |œ|€|€ ingestion_agent.py        # Load local filings + fetch real filings from EDGAR
-|‚   |œ|€|€ extraction_agent.py       # Structured risk extraction
-|‚   |œ|€|€ rag_agent.py              # ChromaDB indexing + retrieval + Q&A + embedding factory
-|‚   |œ|€|€ synthesis_agent.py        # Executive memo generation + confidence score
-|‚   |œ|€|€ comparison_agent.py       # Year-over-year trend synthesis
-|‚   |œ|€|€ evaluation.py             # Accuracy scoring against ground truth
-|‚   |œ|€|€ orchestrator.py           # LangGraph StateGraph + timing + tracing instrumentation
-|‚   |”|€|€ api/
-|‚       |œ|€|€ main.py               # FastAPI app: routes, middleware, RBAC, caching, DB, metrics
-|‚       |œ|€|€ auth.py               # API key auth + role-based access control
-|‚       |”|€|€ models.py             # Request/response schemas
-|œ|€|€ tests/                        # 156 tests, all passing offline, 94% coverage
-|œ|€|€ data/
-|‚   |œ|€|€ sample_filings/           # Synthetic FY2024 + FY2025 demo filings
-|‚   |”|€|€ ground_truth_labels.json  # Hand-labeled ground truth for evaluation
-|œ|€|€ docs/
-|‚   |œ|€|€ TECH_DECISIONS.md         # Why each tool was chosen, trade-offs
-|‚   |œ|€|€ INTERVIEW_PREP.md         # Anticipated technical questions
-|‚   |”|€|€ DEPLOYMENT.md             # Step-by-step: GitHub -> local -> cloud (no Docker)
-|œ|€|€ app.py                        # Streamlit dashboard
-|œ|€|€ run_demo.py                   # CLI: single-filing pipeline
-|œ|€|€ run_yoy_comparison.py         # CLI: year-over-year comparison
-|œ|€|€ run_evaluation.py             # CLI: evaluation harness
-|œ|€|€ run_portfolio_analysis.py     # CLI: multi-company portfolio ranking
-|œ|€|€ Procfile                      # Process types for Honcho / Render / Railway
-|œ|€|€ pyproject.toml                # ruff/black/pytest/bandit config
-|œ|€|€ Makefile                      # make install/test/lint/demo/yoy/eval/app/api/worker/dev/loadtest
-|œ|€|€ requirements.txt
-|”|€|€ LICENSE
+||| .github/workflows/
+|‚   ||| tests.yml                 # CI: lint, format, security scan, tests, coverage
+|‚   |”|| deploy.yml                # CD template: deploys to Render after tests pass
+||| monitoring/
+|‚   ||| prometheus.yml            # Scrape config (usable with a native or hosted Prometheus)
+|‚   |”|| grafana/
+|‚       ||| dashboards/awi-operations.json
+|‚       |”|| provisioning/         # Auto-configured datasource + dashboard
+||| loadtest/
+|‚   ||| locustfile.py             # Load test definitions
+|‚   |”|| RESULTS.md                # Real recorded benchmark runs
+||| src/
+|‚   ||| config.py                 # Centralized, typed settings (env-driven)
+|‚   ||| logging_config.py         # Structured JSON logging
+|‚   ||| tracing.py                # OpenTelemetry span instrumentation
+|‚   ||| metrics.py                # Prometheus metrics (HTTP + per-agent-stage)
+|‚   ||| db.py                     # SQLAlchemy persistence (reports + audit log)
+|‚   ||| cache.py                  # Pluggable cache backend (memory | Redis)
+|‚   ||| tasks.py                  # Celery async job definitions
+|‚   ||| edgar_client.py           # Real SEC EDGAR API client (mocked in tests)
+|‚   ||| report_export.py          # Markdown / PDF / DOCX export
+|‚   ||| approval_workflow.py      # Human-in-the-loop confidence-based routing
+|‚   ||| portfolio_agent.py        # Cross-company growth/risk/debt ranking + narrative
+|‚   ||| schemas.py                # Pydantic contracts for all agent/report outputs
+|‚   ||| llm_client.py             # Gemini/Ollama wrapper, mock/live modes, retry logic
+|‚   ||| ingestion_agent.py        # Load local filings + fetch real filings from EDGAR
+|‚   ||| extraction_agent.py       # Structured risk extraction
+|‚   ||| rag_agent.py              # ChromaDB indexing + retrieval + Q&A + embedding factory
+|‚   ||| synthesis_agent.py        # Executive memo generation + confidence score
+|‚   ||| comparison_agent.py       # Year-over-year trend synthesis
+|‚   ||| evaluation.py             # Accuracy scoring against ground truth
+|‚   ||| orchestrator.py           # LangGraph StateGraph + timing + tracing instrumentation
+|‚   |”|| api/
+|‚       ||| main.py               # FastAPI app: routes, middleware, RBAC, caching, DB, metrics
+|‚       ||| auth.py               # API key auth + role-based access control
+|‚       |”|| models.py             # Request/response schemas
+||| tests/                        # 156 tests, all passing offline, 94% coverage
+||| data/
+|‚   ||| sample_filings/           # Synthetic FY2024 + FY2025 demo filings
+|‚   |”|| ground_truth_labels.json  # Hand-labeled ground truth for evaluation
+||| docs/
+|‚   ||| TECH_DECISIONS.md         # Why each tool was chosen, trade-offs
+|‚   ||| INTERVIEW_PREP.md         # Anticipated technical questions
+|‚   |”|| DEPLOYMENT.md             # Step-by-step: GitHub -> local -> cloud (no Docker)
+||| app.py                        # Streamlit dashboard
+||| run_demo.py                   # CLI: single-filing pipeline
+||| run_yoy_comparison.py         # CLI: year-over-year comparison
+||| run_evaluation.py             # CLI: evaluation harness
+||| run_portfolio_analysis.py     # CLI: multi-company portfolio ranking
+||| Procfile                      # Process types for Honcho / Render / Railway
+||| pyproject.toml                # ruff/black/pytest/bandit config
+||| Makefile                      # make install/test/lint/demo/yoy/eval/app/api/worker/dev/loadtest
+||| requirements.txt
+|”|| LICENSE
 ```
 
 ## Running it
@@ -470,5 +470,6 @@ no Docker): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
 
 
