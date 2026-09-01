@@ -1,6 +1,6 @@
 ﻿# Agentic Wealth Intelligence
 
-![Tests](https://github.com/YOUR_USERNAME/agentic-wealth-intelligence/actions/workflows/tests.yml/badge.svg)
+![Tests](https://github.com/Shraddhatodkari/agentic-wealth-intelligence/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)
@@ -309,7 +309,7 @@ agentic-wealth-intelligence/
 **No Docker required for any of this.**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/agentic-wealth-intelligence.git
+git clone https://github.com/Shraddhatodkari/agentic-wealth-intelligence.git
 cd agentic-wealth-intelligence
 pip install -r requirements.txt
 
@@ -477,6 +477,7 @@ no Docker): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ## License
 
 MIT â€” see [LICENSE](LICENSE).
+
 
 
 
