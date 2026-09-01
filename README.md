@@ -399,8 +399,8 @@ role return `403`; requests exceeding the rate limit return `429`.
 bar (total reports, memos, comparisons, evaluations, companies covered)
 and six tabs: **ðŸ” Analyze** (with live confidence/approval-status
 badges), **ðŸ“ˆ Compare Years**, **ðŸ¢ Portfolio** (cross-company rankings +
-chart), **ðŸ§‘â€âš–ï¸ Pending Review** (the human reviewer queue â€” approve/reject
-with an editable recommendation), **âœ… Evaluate**, **ðŸ—‚ï¸ Report History** â€”
+chart), **ðŸ§‘â€âš-ï¸ Pending Review** (the human reviewer queue â€” approve/reject
+with an editable recommendation), **âœ… Evaluate**, **ðŸ-‚ï¸ Report History** â€”
 charts, ad-hoc Q&A, Markdown/PDF/DOCX downloads, all backed by the same
 database the API uses.
 
