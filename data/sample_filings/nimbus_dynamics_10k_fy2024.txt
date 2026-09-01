@@ -1,0 +1,30 @@
+NIMBUS DYNAMICS, INC.
+FORM 10-K
+For the Fiscal Year Ended December 31, 2024
+
+(NOTE: Nimbus Dynamics is a fictional company created for demonstration
+purposes. This filing is synthetic and does not represent any real
+business or financial data.)
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Consolidated revenue for fiscal year 2024 was $898 million, an increase
+of 11% compared to $809 million in fiscal year 2023. Growth was led by
+our Cloud Infrastructure segment, which grew 18% year-over-year to $361
+million on strong enterprise renewal rates. Managed Services grew 6%
+year-over-year to $376 million. Data Analytics, our newest segment,
+grew 40% year-over-year to $100 million from a small base.
+
+ITEM 7A. QUANTITATIVE AND QUALITATIVE DISCLOSURES ABOUT MARKET RISK
+
+Our credit agreement requires us to maintain a maximum leverage ratio
+(total debt to EBITDA) of 3.5x. As of December 31, 2024, our leverage
+ratio was 2.9x, comfortably within the covenant limit. Our credit
+agreement also requires a minimum interest coverage ratio of 2.5x; we
+reported 3.4x for the period, reflecting healthy debt service capacity.
+
+ITEM 3. LEGAL PROCEEDINGS
+
+The Company is not currently subject to any material legal proceedings
+outside the ordinary course of business. Management is not aware of any
+pending regulatory inquiries as of the filing date.

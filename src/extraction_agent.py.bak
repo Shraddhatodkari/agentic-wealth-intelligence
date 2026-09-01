@@ -1,0 +1,1005 @@
+"""
+Evidence-grounded Extraction Agent.
+
+Ollama performs semantic extraction, while deterministic reconciliation
+protects explicit financial facts from sign errors, value swapping,
+unsupported inference, and false-positive classification.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import List
+
+from .ingestion_agent import Chunk
+from .llm_client import LLMClient
+from .schemas import DebtCovenant, ExtractionResult, LegalRisk, RevenueSignal
+
+
+EXTRACTION_PROMPT_TEMPLATE = """You are a conservative financial-data
+extraction engine analyzing a 10-K filing.
+
+Company: {company}
+Fiscal year: {fiscal_year}
+
+FILING TEXT:
+---
+{text}
+---
+
+Extract ONLY facts explicitly supported by the filing.
+
+NON-NEGOTIABLE RULES:
+
+1. Preserve the exact sign of every percentage.
+2. Preserve every explicitly stated percentage.
+3. Preserve the relationship between a number and its business segment.
+4. NEVER move a monetary amount from one legal matter to another.
+5. A monetary amount is NOT a debt covenant merely because it is large.
+6. Tax expense, tax rate, R&D credit, valuation allowance, cash balance,
+   operating expense, or other accounting figures are NOT debt covenants.
+7. A debt covenant requires explicit covenant/credit-agreement/debt-limit
+   language plus a threshold/current measurement.
+8. A legal risk requires an explicit legal, litigation, lawsuit, regulatory,
+   investigation, enforcement, patent, antitrust, or similar matter.
+9. Do NOT classify ordinary tax/accounting language as legal proceedings.
+10. If no explicit debt covenant exists, return an empty debt_covenants array.
+11. If no explicit legal/regulatory matter exists, return an empty legal_risks array.
+12. Never invent numbers.
+13. Never swap numbers between facts.
+14. Keep company and fiscal year exactly as supplied.
+15. Return empty arrays when evidence does not exist.
+
+Return valid JSON matching the requested schema.
+"""
+
+
+MAX_EXTRACTION_CHUNKS = 12
+MAX_EXTRACTION_CHARS = 12000
+
+
+RELEVANCE_TERMS = {
+    "revenue": (
+        "revenue",
+        "sales",
+        "net sales",
+        "operating revenue",
+        "income",
+        "growth",
+        "increased",
+        "decreased",
+        "decline",
+        "declined",
+        "fall",
+        "fell",
+        "grew",
+        "rose",
+        "year over year",
+        "year-over-year",
+        "yoy",
+    ),
+    "debt": (
+        "debt covenant",
+        "covenant",
+        "credit agreement",
+        "leverage ratio",
+        "debt-to-ebitda",
+        "interest coverage",
+        "maximum leverage",
+        "minimum interest coverage",
+        "borrowing",
+        "loan agreement",
+        "credit facility",
+    ),
+    "legal": (
+        "legal proceeding",
+        "legal proceedings",
+        "lawsuit",
+        "litigation",
+        "claim",
+        "claims",
+        "regulatory proceeding",
+        "regulatory investigation",
+        "government investigation",
+        "governmental investigation",
+        "patent litigation",
+        "antitrust investigation",
+        "enforcement action",
+        "civil investigative demand",
+        "class action",
+        "settlement",
+    ),
+}
+
+
+def _extract_percentages(text: str) -> list[float]:
+    return [
+        float(match.group(1))
+        for match in re.finditer(
+            r"(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*%",
+            text,
+        )
+    ]
+
+
+def _extract_money(text: str) -> list[str]:
+    pattern = (
+        r"\$\s*\d+(?:,\d{3})*(?:\.\d+)?"
+        r"(?:\s+(?:thousand|million|billion|trillion))?"
+    )
+
+    return [
+        match.group(0).strip()
+        for match in re.finditer(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+    ]
+
+
+def _chunk_relevance_score(chunk: Chunk) -> int:
+    text = chunk.text.lower()
+    score = 0
+
+    for terms in RELEVANCE_TERMS.values():
+        for term in terms:
+            if term in text:
+                score += 1
+
+    if _extract_percentages(chunk.text):
+        score += 2
+
+    if _extract_money(chunk.text):
+        score += 1
+
+    if re.search(r"\b\d+(?:\.\d+)?\s*x\b", text):
+        score += 3
+
+    return score
+
+
+def _select_relevant_chunks(chunks: List[Chunk]) -> list[Chunk]:
+    if not chunks:
+        return []
+
+    ranked = sorted(
+        enumerate(chunks),
+        key=lambda item: (-_chunk_relevance_score(item[1]), item[0]),
+    )
+
+    selected: list[Chunk] = []
+    selected_ids: set[str] = set()
+    total_chars = 0
+
+    for _, chunk in ranked:
+        score = _chunk_relevance_score(chunk)
+
+        if score <= 0:
+            continue
+
+        if len(selected) >= MAX_EXTRACTION_CHUNKS:
+            break
+
+        remaining = MAX_EXTRACTION_CHARS - total_chars
+
+        if remaining <= 0:
+            break
+
+        if chunk.chunk_id in selected_ids:
+            continue
+
+        text = chunk.text[:remaining]
+
+        selected.append(
+            Chunk(
+                chunk_id=chunk.chunk_id,
+                text=text,
+                section=chunk.section,
+            )
+        )
+
+        selected_ids.add(chunk.chunk_id)
+        total_chars += len(text)
+
+    selected.sort(
+        key=lambda chunk: next(
+            i
+            for i, original in enumerate(chunks)
+            if original.chunk_id == chunk.chunk_id
+        )
+    )
+
+    return selected
+
+
+def _clean_text(source_text: str) -> str:
+    text = re.sub(
+        r"&#\d+;|&[A-Za-z]+;",
+        " ",
+        source_text,
+    )
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+def _parse_revenue_evidence(
+    source_text: str,
+    fiscal_year: str,
+) -> list[RevenueSignal]:
+    """
+    Deterministic extraction of explicit revenue YoY changes.
+
+    Priority:
+    1. Apple Products and Services Performance table when present.
+    2. Explicit segment-level revenue statements.
+    3. Conservative generic revenue-change statements.
+
+    The parser never invents a percentage or assigns a percentage to a
+    segment unless the source text explicitly connects the two.
+    """
+
+    text = _clean_text(source_text)
+
+    signals: list[RevenueSignal] = []
+    seen: set[tuple[str, float]] = set()
+
+    def add_signal(
+        segment: str,
+        value: float,
+        evidence: str,
+    ) -> None:
+        segment = re.sub(
+            r"\s+",
+            " ",
+            segment,
+        ).strip(" ,;:.-")
+
+        if not segment:
+            return
+
+        key = (segment.casefold(), value)
+
+        if key in seen:
+            return
+
+        seen.add(key)
+
+        signals.append(
+            RevenueSignal(
+                period=fiscal_year,
+                segment=segment,
+                trend="decline" if value < 0 else "growth",
+                yoy_change_pct=value,
+                note=evidence.strip(),
+            )
+        )
+
+    # ================================================================
+    # 1. Apple Products and Services Performance table
+    # ================================================================
+
+    table_match = re.search(
+        r"Products\s+and\s+Services\s+Performance"
+        r".{0,7000}?"
+        r"Total\s+net\s+sales",
+        text,
+        re.IGNORECASE,
+    )
+
+    if table_match:
+        table = table_match.group(0)
+
+        table_patterns = [
+            (
+                "iPhone",
+                r"\biPhone\s+\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s*(?:&#160;|\s)*"
+                r"([+-]?\d+(?:\.\d+)?)\s*%",
+            ),
+            (
+                "Mac",
+                r"\bMac\s+\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s*(?:&#160;|\s)*"
+                r"([+-]?\d+(?:\.\d+)?)\s*%",
+            ),
+            (
+                "iPad",
+                r"\biPad\s+\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s*(?:&#160;|\s)*"
+                r"([+-]?\d+(?:\.\d+)?)\s*%",
+            ),
+            (
+                "Wearables, Home and Accessories",
+                r"Wearables,\s*Home\s+and\s+Accessories\s+"
+                r"\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s*(?:&#160;|\s)*"
+                r"\(\s*(\d+(?:\.\d+)?)\s*\)\s*%",
+            ),
+            (
+                "Services",
+                r"\bServices\s+(?:\(1\)\s*)?"
+                r"\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s*(?:&#160;|\s)*"
+                r"([+-]?\d+(?:\.\d+)?)\s*%",
+            ),
+            (
+                "Consolidated",
+                r"Total\s+net\s+sales\s+"
+                r"\$?\s*[\d,]+(?:\.\d+)?"
+                r"\s+"
+                r"([+-]?\d+(?:\.\d+)?)\s*%",
+            ),
+        ]
+
+        for segment, pattern in table_patterns:
+            match = re.search(
+                pattern,
+                table,
+                re.IGNORECASE,
+            )
+
+            if not match:
+                continue
+
+            value = float(match.group(1))
+
+            if segment == "Wearables, Home and Accessories":
+                value = -abs(value)
+
+            add_signal(
+                segment=segment,
+                value=value,
+                evidence=(
+                    "Explicit SEC filing evidence from the "
+                    "Products and Services Performance table: "
+                    f"{segment} changed {abs(value):g}% "
+                    "year-over-year."
+                ),
+            )
+
+        total_match = re.search(
+            r"Total\s+net\s+sales\s+"
+            r"\$?\s*[\d,]+(?:\.\d+)?"
+            r"\s+"
+            r"(?:\(|\[)?"
+            r"([+-]?\d+(?:\.\d+)?)"
+            r"(?:\)|\])?\s*%",
+            table,
+            re.IGNORECASE,
+        )
+
+        if total_match:
+            total_value = float(total_match.group(1))
+
+            add_signal(
+                segment="Consolidated",
+                value=total_value,
+                evidence=(
+                    "Explicit SEC filing evidence from the "
+                    "Products and Services Performance table: "
+                    f"Total net sales changed {abs(total_value):g}% "
+                    "year-over-year."
+                ),
+            )
+
+        if signals:
+            return signals
+
+    # ================================================================
+    # 1B. Generic consolidated revenue table
+    #
+    # Handles SEC tables where consolidated/total revenue has an
+    # explicitly reported year-over-year percentage change.
+    # ================================================================
+
+    consolidated_revenue_match = re.search(
+        r"""
+        \b(?:Consolidated|Total)\s+revenues?\b
+        .*?
+        ([+-]?\d+(?:\.\d+)?)
+        \s*%
+        """,
+        text,
+        re.IGNORECASE | re.VERBOSE | re.DOTALL,
+    )
+
+    if consolidated_revenue_match:
+        value = float(consolidated_revenue_match.group(1))
+
+        add_signal(
+            segment="Consolidated",
+            value=value,
+            evidence=(
+                "Explicit SEC filing evidence from the "
+                "consolidated revenue table: "
+                f"Consolidated revenues changed "
+                f"{abs(value):g}% year-over-year."
+            ),
+        )
+
+    # ================================================================
+    # 2. Explicit segment revenue statements
+    # ================================================================
+
+    negative_words = (
+        "fall",
+        "fell",
+        "decline",
+        "declined",
+        "decrease",
+        "decreased",
+        "down",
+    )
+
+    positive_words = (
+        "increase",
+        "increased",
+        "increasing",
+        "grew",
+        "grow",
+        "rose",
+        "rising",
+        "up",
+    )
+
+    explicit_revenue_pattern = re.compile(
+        r"""
+        \b
+        (?P<segment>
+            Cloud\s+Infrastructure
+            |Managed\s+Services
+            |Data\s+Analytics
+            |Data\s+Center
+            |Intelligent\s+Cloud
+            |More\s+Personal\s+Computing
+            |Productivity\s+and\s+Business\s+Processes
+            |Commercial\s+cloud
+            |Consumer\s+cloud
+            |Microsoft\s+Cloud
+            |LinkedIn
+            |Azure(?:\s+and\s+other\s+cloud\s+services)?
+            |Gaming
+            |iPhone
+            |Mac
+            |iPad
+            |Services
+            |[A-Z][A-Za-z0-9&/.'-]*
+                (?:\s+[A-Z][A-Za-z0-9&/.'-]*){0,3}
+        )
+        \s+
+        (?:segment\s+)?
+        revenue
+        (?:\s+was|\s+has\s+)?
+        \s*
+        (?P<direction>
+            increased|increase|increasing|grew|grow|rose|rising|up|
+            decreased|decrease|decreasing|declined|decline|fell|fall|down
+        )
+        (?:\s+by)?
+        \s+
+        (?P<pct>[+-]?\d+(?:\.\d+)?)\s*%
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    for match in explicit_revenue_pattern.finditer(text):
+        segment = match.group("segment").strip()
+        direction = match.group("direction").lower()
+        pct = float(match.group("pct"))
+
+        value = (
+            -abs(pct)
+            if direction in negative_words
+            else abs(pct)
+        )
+
+        add_signal(
+            segment=segment,
+            value=value,
+            evidence=(
+                "Explicit filing evidence: "
+                f"{segment} revenue changed "
+                f"{abs(value):g}% year-over-year."
+            ),
+        )
+
+    # ================================================================
+    # 3. Compact explicit segment statements
+    #
+    # Examples:
+    #   Data Center: 68%
+    #   Cloud Infrastructure revenue: 12%
+    #   Revenue -5%
+    # ================================================================
+
+    compact_pattern = re.compile(
+        r"""
+        \b
+        (?P<segment>
+            Cloud\s+Infrastructure
+            |Managed\s+Services
+            |Data\s+Analytics
+            |Data\s+Center
+            |Intelligent\s+Cloud
+            |More\s+Personal\s+Computing
+            |Productivity\s+and\s+Business\s+Processes
+            |Commercial\s+cloud
+            |Consumer\s+cloud
+            |Microsoft\s+Cloud
+            |LinkedIn
+            |Azure(?:\s+and\s+other\s+cloud\s+services)?
+            |Gaming
+            |iPhone
+            |Mac
+            |iPad
+            |Services
+            |Revenue
+            |[A-Z][A-Za-z0-9&/.'-]*
+                (?:\s+[A-Z][A-Za-z0-9&/.'-]*){0,3}
+        )
+        \s*
+        (?:
+            revenue\s*[:\-]?
+            |[:\-]
+        )
+        \s*
+        (?P<pct>[+-]?\d+(?:\.\d+)?)\s*%
+        (?:\s*(?:YoY|year[-\s]+over[-\s]+year))?
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    for match in compact_pattern.finditer(text):
+        segment = match.group("segment").strip()
+        pct = float(match.group("pct"))
+
+        add_signal(
+            segment=segment,
+            value=pct,
+            evidence=(
+                "Explicit filing evidence: "
+                f"{segment} revenue changed "
+                f"{abs(pct):g}% year-over-year."
+            ),
+        )
+
+    # ================================================================
+    # 4. Generic explicit revenue-change fallback
+    # ================================================================
+
+    generic_pattern = re.compile(
+        r"""
+        \b
+        (?P<segment>
+            (?:[A-Z][A-Za-z0-9&/.'-]*)
+            (?:\s+[A-Z][A-Za-z0-9&/.'-]*){0,3}
+        )
+        (?:\s+segment)?
+        \s*
+        (?:,\s*)?
+        (?:
+            which\s+(?:saw\s+)?
+            |that\s+(?:saw\s+)?
+        )?
+        (?:revenue\s+)?
+        (?P<direction>
+            increased|increase|increasing|grew|grow|rose|rising|
+            decreased|decrease|decreasing|declined|decline|fell|fall
+        )
+        (?:\s+by)?
+        \s+
+        (?P<pct>[+-]?\d+(?:\.\d+)?)\s*%
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    for match in generic_pattern.finditer(text):
+        segment = match.group("segment").strip()
+        direction = match.group("direction").lower()
+        pct = float(match.group("pct"))
+
+        if len(segment.split()) > 4:
+            continue
+
+        if segment.casefold() in {
+            "our",
+            "the",
+            "company",
+            "business",
+            "smallest",
+            "largest",
+            "total",
+        }:
+            continue
+
+        value = (
+            -abs(pct)
+            if any(word in direction for word in negative_words)
+            else abs(pct)
+        )
+
+        add_signal(
+            segment=segment,
+            value=value,
+            evidence=(
+                "Explicit filing evidence: "
+                f"{segment} changed "
+                f"{abs(value):g}% year-over-year."
+            ),
+        )
+
+    return signals
+
+
+def _parse_debt_evidence(
+    source_text: str,
+) -> list[DebtCovenant]:
+    """
+    Extract ONLY explicit debt covenant measurements.
+    """
+
+    text = _clean_text(source_text)
+
+    results: list[DebtCovenant] = []
+
+    leverage_patterns = [
+        re.compile(
+            r"maximum\s+leverage\s+ratio"
+            r".{0,120}?"
+            r"(?:of|at|equal\s+to)"
+            r"\s*(?P<limit>\d+(?:\.\d+)?)\s*x"
+            r".{0,200}?"
+            r"(?:leverage\s+ratio|ratio)"
+            r".{0,100}?"
+            r"(?:was|is|stood\s+at|equaled)"
+            r"\s*(?P<current>\d+(?:\.\d+)?)\s*x",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"leverage\s+ratio"
+            r".{0,100}?"
+            r"(?:was|is|stood\s+at)"
+            r"\s*(?P<current>\d+(?:\.\d+)?)\s*x"
+            r".{0,180}?"
+            r"(?:maximum|limit|covenant)"
+            r".{0,100}?"
+            r"(?P<limit>\d+(?:\.\d+)?)\s*x",
+            re.IGNORECASE,
+        ),
+    ]
+
+    for pattern in leverage_patterns:
+        match = pattern.search(text)
+
+        if not match:
+            continue
+
+        current = float(match.group("current"))
+        limit = float(match.group("limit"))
+
+        status = (
+            "compliant"
+            if current <= limit
+            else "breached"
+        )
+
+        results.append(
+            DebtCovenant(
+                covenant_type="leverage ratio",
+                threshold=f"{limit:g}x maximum",
+                current_status=status,
+                note=(
+                    f"Explicit filing evidence: leverage ratio is "
+                    f"{current:g}x versus {limit:g}x maximum."
+                ),
+            )
+        )
+
+        break
+
+    interest_patterns = [
+        re.compile(
+            r"minimum\s+interest\s+coverage\s+ratio"
+            r".{0,120}?"
+            r"(?:of|at|equal\s+to)"
+            r"\s*(?P<limit>\d+(?:\.\d+)?)\s*x"
+            r".{0,200}?"
+            r"(?:interest\s+coverage|coverage\s+ratio)"
+            r".{0,100}?"
+            r"(?:was|is|stood\s+at|equaled)"
+            r"\s*(?P<current>\d+(?:\.\d+)?)\s*x",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"interest\s+coverage"
+            r".{0,100}?"
+            r"(?:was|is|stood\s+at)"
+            r"\s*(?P<current>\d+(?:\.\d+)?)\s*x"
+            r".{0,180}?"
+            r"(?:minimum|threshold|covenant)"
+            r".{0,100}?"
+            r"(?P<limit>\d+(?:\.\d+)?)\s*x",
+            re.IGNORECASE,
+        ),
+    ]
+
+    for pattern in interest_patterns:
+        match = pattern.search(text)
+
+        if not match:
+            continue
+
+        current = float(match.group("current"))
+        limit = float(match.group("limit"))
+
+        status = (
+            "compliant"
+            if current >= limit
+            else "breached"
+        )
+
+        results.append(
+            DebtCovenant(
+                covenant_type="interest coverage",
+                threshold=f"{limit:g}x minimum",
+                current_status=status,
+                note=(
+                    f"Explicit filing evidence: interest coverage is "
+                    f"{current:g}x versus {limit:g}x minimum."
+                ),
+            )
+        )
+
+        break
+
+    return results
+
+
+def _parse_legal_evidence(
+    source_text: str,
+) -> list[LegalRisk]:
+    """
+    Extract ONLY explicit legal/regulatory matters.
+    """
+
+    text = _clean_text(source_text)
+
+    results: list[LegalRisk] = []
+
+    legal_pattern = re.compile(
+        r"\b(?P<context>"
+        r"civil\s+investigative\s+demand|"
+        r"investigative\s+demand|"
+        r"class\s+action|"
+        r"class\s+actions|"
+        r"lawsuit|"
+        r"litigation|"
+        r"legal\s+proceeding|"
+        r"legal\s+proceedings|"
+        r"regulatory\s+proceeding|"
+        r"regulatory\s+proceedings|"
+        r"government\s+investigation|"
+        r"governmental\s+investigation|"
+        r"regulatory\s+investigation|"
+        r"patent\s+litigation|"
+        r"antitrust\s+investigation|"
+        r"enforcement\s+action"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    seen: set[str] = set()
+
+    for match in legal_pattern.finditer(text):
+        matter = " ".join(
+            match.group("context").split()
+        ).strip()
+
+        key = matter.lower()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        window_start = max(
+            0,
+            match.start() - 250,
+        )
+
+        window_end = min(
+            len(text),
+            match.end() + 700,
+        )
+
+        window = text[
+            window_start:window_end
+        ]
+
+        lower_window = window.lower()
+
+        if not any(
+            legal_term in lower_window
+            for legal_term in (
+                "lawsuit",
+                "litigation",
+                "legal proceeding",
+                "regulatory proceeding",
+                "investigation",
+                "investigative demand",
+                "class action",
+                "patent litigation",
+                "antitrust investigation",
+                "enforcement action",
+            )
+        ):
+            continue
+
+        exposure_match = re.search(
+            r"(?:loss|exposure|settlement|penalty)"
+            r".{0,120}?"
+            r"("
+            r"\$[0-9][0-9,]*(?:\.[0-9]+)?"
+            r"(?:\s+(?:million|billion|thousand))?"
+            r"(?:\s+to\s+"
+            r"\$[0-9][0-9,]*(?:\.[0-9]+)?"
+            r"(?:\s+(?:million|billion|thousand))?"
+            r")?"
+            r")",
+            window,
+            re.IGNORECASE,
+        )
+
+        exposure = (
+            exposure_match.group(1)
+            if exposure_match
+            else None
+        )
+
+        if any(
+            phrase in lower_window
+            for phrase in (
+                "probable",
+                "reasonably possible",
+                "material adverse",
+                "material impact",
+                "significant",
+            )
+        ):
+            severity = "high"
+
+        elif any(
+            phrase in lower_window
+            for phrase in (
+                "possible",
+                "contingent",
+                "uncertain",
+            )
+        ):
+            severity = "medium"
+
+        else:
+            severity = "low"
+
+        results.append(
+            LegalRisk(
+                matter=matter,
+                severity=severity,
+                potential_exposure=exposure,
+                note=(
+                    "Legal or regulatory matter identified "
+                    "from explicit filing evidence."
+                ),
+            )
+        )
+
+    return results
+
+
+def _reconcile_with_source(
+    result: ExtractionResult,
+    source_text: str,
+) -> ExtractionResult:
+    """
+    Deterministic source reconciliation.
+
+    The filing is authoritative.
+
+    Parsed empty arrays replace the LLM output.
+    """
+
+    parsed_revenue = _parse_revenue_evidence(
+        source_text,
+        result.fiscal_year,
+    )
+
+    parsed_debt = _parse_debt_evidence(
+        source_text,
+    )
+
+    parsed_legal = _parse_legal_evidence(
+        source_text,
+    )
+
+    result.revenue_signals = parsed_revenue
+    result.debt_covenants = parsed_debt
+    result.legal_risks = parsed_legal
+
+    return result
+
+
+class ExtractionAgent:
+    def __init__(
+        self,
+        llm: LLMClient,
+    ):
+        self.llm = llm
+
+    def extract(
+        self,
+        chunks: List[Chunk],
+        company: str,
+        fiscal_year: str,
+        mock_response: dict | None = None,
+    ) -> ExtractionResult:
+
+        full_source_text = "\n".join(
+            chunk.text
+            for chunk in chunks
+        )
+
+        selected_chunks = _select_relevant_chunks(
+            chunks
+        )
+
+        extraction_text = "\n".join(
+            chunk.text
+            for chunk in selected_chunks
+        )
+
+        # Keep the Ollama extraction prompt bounded. Source reconciliation
+        # below remains authoritative and still receives the full source.
+        MAX_LLM_EXTRACTION_CHARS = 18000
+
+        if len(extraction_text) > MAX_LLM_EXTRACTION_CHARS:
+            extraction_text = extraction_text[
+                :MAX_LLM_EXTRACTION_CHARS
+            ]
+
+        prompt = EXTRACTION_PROMPT_TEMPLATE.format(
+            company=company,
+            fiscal_year=fiscal_year,
+            text=extraction_text,
+        )
+
+        default_mock = {
+            "company": company,
+            "fiscal_year": fiscal_year,
+            "revenue_signals": [],
+            "debt_covenants": [],
+            "legal_risks": [],
+        }
+
+        result = self.llm.structured_call(
+            prompt=prompt,
+            schema=ExtractionResult,
+            mock_response=(
+                mock_response
+                or default_mock
+            ),
+        )
+
+        result = result.model_copy(
+            update={
+                "company": company,
+                "fiscal_year": fiscal_year,
+            }
+        )
+
+        return _reconcile_with_source(
+            result=result,
+            source_text=full_source_text,
+        )

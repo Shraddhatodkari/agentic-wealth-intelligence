@@ -1,0 +1,45 @@
+NIMBUS DYNAMICS, INC.
+FORM 10-K
+For the Fiscal Year Ended December 31, 2025
+
+(NOTE: Nimbus Dynamics is a fictional company created for demonstration
+purposes. This filing is synthetic and does not represent any real
+business or financial data.)
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Consolidated revenue for fiscal year 2025 was $842 million, a decline
+of 6.3% compared to $898 million in fiscal year 2024. The decline was
+primarily driven by our Cloud Infrastructure segment, which saw revenue
+fall 14% year-over-year to $310 million, as enterprise customers delayed
+renewal decisions amid macroeconomic uncertainty. Our Managed Services
+segment grew 9% year-over-year to $410 million, partially offsetting the
+decline. Our smallest segment, Data Analytics, grew 22% year-over-year
+to $122 million.
+
+ITEM 7A. QUANTITATIVE AND QUALITATIVE DISCLOSURES ABOUT MARKET RISK
+
+Our credit agreement requires us to maintain a maximum leverage ratio
+(total debt to EBITDA) of 3.5x. As of December 31, 2025, our leverage
+ratio was 3.3x, compared to a covenant limit of 3.5x, leaving limited
+headroom given the revenue decline in our largest segment. Our credit
+agreement also requires a minimum interest coverage ratio of 2.5x; we
+reported 2.7x for the period, which we consider compliant but with
+reduced margin relative to the prior fiscal year's 3.4x.
+
+ITEM 3. LEGAL PROCEEDINGS
+
+In March 2025, the Company received a Civil Investigative Demand from
+the Federal Trade Commission related to data retention practices in our
+Cloud Infrastructure segment. The Company is cooperating with the
+investigation. Based on information currently available, management
+estimates a reasonably possible loss in the range of $15 million to
+$40 million, though no amount within that range is considered more
+probable than any other, and no liability has been accrued.
+
+Separately, the Company is a defendant in a putative class action
+alleging deceptive billing practices related to auto-renewal terms in
+select state jurisdictions. The Company believes the claims are without
+merit and intends to defend vigorously. Given the early stage of
+proceedings, the Company cannot reasonably estimate a range of potential
+loss at this time.

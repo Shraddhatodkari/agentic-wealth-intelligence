@@ -1,0 +1,22 @@
+{
+  "nimbus_dynamics_10k_fy2025.txt": {
+    "company": "Nimbus Dynamics, Inc.",
+    "fiscal_year": "FY2025",
+    "expected_revenue_signal_count": 4,
+    "expected_debt_covenant_count": 2,
+    "expected_legal_risk_count": 2,
+    "expected_high_severity_legal_risks": 1,
+    "expected_consolidated_revenue_trend": "decline",
+    "expected_leverage_ratio_status": "compliant"
+  },
+  "nimbus_dynamics_10k_fy2024.txt": {
+    "company": "Nimbus Dynamics, Inc.",
+    "fiscal_year": "FY2024",
+    "expected_revenue_signal_count": 4,
+    "expected_debt_covenant_count": 2,
+    "expected_legal_risk_count": 0,
+    "expected_high_severity_legal_risks": 0,
+    "expected_consolidated_revenue_trend": "growth",
+    "expected_leverage_ratio_status": "compliant"
+  }
+}

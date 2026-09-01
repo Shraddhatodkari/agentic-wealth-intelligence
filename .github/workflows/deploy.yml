@@ -1,0 +1,27 @@
+name: Deploy (Render)
+
+# Template CD workflow - deploys to Render on every push to main, AFTER
+# the test workflow passes. This does NOT run automatically until you:
+#   1. Create a Render account and a Web Service pointing at this repo
+#   2. Add two repository secrets: RENDER_SERVICE_ID and RENDER_API_KEY
+#      (Settings -> Secrets and variables -> Actions in your GitHub repo)
+# Until those secrets exist, this workflow will fail at the deploy step -
+# that's expected and safe; it doesn't affect the Tests workflow at all.
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          curl -f -X POST \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json"

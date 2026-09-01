@@ -1,0 +1,176 @@
+﻿"""
+LLM client supporting mock, live (Gemini), and Ollama modes.
+
+Ollama is the default free/local production mode for this project.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Type
+
+import requests
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
+
+from src.config import settings
+
+
+class LLMCallError(RuntimeError):
+    """Raised when an LLM call fails."""
+
+
+class LLMClient:
+    """Unified client for mock, live, and Ollama modes."""
+
+    def __init__(self, mode: str | None = None):
+        self.mode = (mode or settings.llm_mode).lower()
+        self._client = None
+
+        if self.mode not in {"mock", "live", "ollama"}:
+            raise ValueError(f"Unsupported LLM mode: {self.mode}")
+
+        if self.mode == "live":
+            api_key = settings.gemini_api_key
+
+            if not api_key:
+                raise RuntimeError(
+                    "GEMINI_API_KEY is required when LLM_MODE=live"
+                )
+
+            self._client = genai.Client(api_key=api_key)
+
+    def structured_call(
+        self,
+        prompt: str,
+        schema: Type[BaseModel],
+        mock_response: dict[str, Any] | None = None,
+    ) -> BaseModel:
+
+        if self.mode == "mock":
+            if mock_response is None:
+                raise ValueError(
+                    "mock_response is required in mock mode"
+                )
+
+            return schema.model_validate(mock_response)
+
+        if self.mode == "live":
+            return self._gemini_call(prompt, schema)
+
+        if self.mode == "ollama":
+            return self._ollama_call(prompt, schema)
+
+        raise LLMCallError(f"Unsupported LLM mode: {self.mode}")
+
+    def _gemini_call(
+        self,
+        prompt: str,
+        schema: Type[BaseModel],
+    ) -> BaseModel:
+
+        if self._client is None:
+            raise LLMCallError("Gemini client is not initialized")
+
+        try:
+            response = self._client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                ),
+            )
+
+            text = getattr(response, "text", None)
+
+            if not text:
+                raise LLMCallError("Gemini returned an empty response")
+
+            return schema.model_validate(json.loads(text))
+
+        except LLMCallError:
+            raise
+
+        except json.JSONDecodeError as exc:
+            raise LLMCallError(
+                f"Gemini returned invalid JSON: {exc}"
+            ) from exc
+
+        except Exception as exc:
+            raise LLMCallError(
+                f"Gemini request failed: {exc}"
+            ) from exc
+
+    def _ollama_call(
+        self,
+        prompt: str,
+        schema: Type[BaseModel],
+    ) -> BaseModel:
+
+        payload = {
+            "model": settings.ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "format": schema.model_json_schema(),
+            "options": {
+                "temperature": 0,
+                "num_ctx": 4096,
+            },
+        }
+
+        try:
+            response = requests.post(
+                settings.ollama_url,
+                json=payload,
+                timeout=600,
+            )
+
+            response.raise_for_status()
+
+            result = response.json()
+            text = result.get("response", "").strip()
+
+            if not text:
+                raise LLMCallError(
+                    "Ollama returned an empty response"
+                )
+
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise LLMCallError(
+                    f"Ollama returned invalid JSON: {exc}. "
+                    f"Raw response: {text[:500]}"
+                ) from exc
+
+            return schema.model_validate(parsed)
+
+        except requests.exceptions.ConnectionError as exc:
+            raise LLMCallError(
+                "Could not connect to Ollama. "
+                "Is Ollama running on localhost:11434?"
+            ) from exc
+
+        except requests.exceptions.Timeout as exc:
+            raise LLMCallError(
+                "Ollama request timed out after 600 seconds. "
+                "The local model may be overloaded or the prompt "
+                "may be too large."
+            ) from exc
+
+        except requests.exceptions.RequestException as exc:
+            raise LLMCallError(
+                f"Ollama request failed: {exc}"
+            ) from exc
+
+        except LLMCallError:
+            raise
+
+        except Exception as exc:
+            raise LLMCallError(
+                f"Ollama processing failed: {exc}"
+            ) from exc
+
+

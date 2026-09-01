@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Debug / temporary
+*_debug.txt
+*.log
+
+# Backup / historical copies
+AgenticWealth_*/
+app.py.backup*
+app.py.before_*
+extraction_agent.py.backup
+src/**/*backup*
+src/**/*backup*.py
+src/**/*BEFORE_*.py
+src/**/*before_*.py
+src/**/*.bak
+src/**/*.bak2
+src/**/*.final_baseline
+src/**/*.backup*
+src/**/*.before_*

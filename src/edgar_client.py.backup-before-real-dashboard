@@ -1,0 +1,110 @@
+"""
+Real SEC EDGAR client.
+
+This hits the actual public SEC EDGAR APIs - no auth required, but SEC
+requires a descriptive User-Agent header identifying the requester
+(https://www.sec.gov/os/webmaster-faq#developers). Configure yours via
+the SEC_USER_AGENT environment variable before using this in a network-
+enabled environment.
+
+This module is NOT exercised against the live network in CI/tests -
+tests mock `requests.get` (see tests/test_edgar_client.py) to verify the
+parsing logic against realistic response shapes, the same pattern used
+for LLM calls elsewhere in this project (mock mode by default, real
+calls behind an explicit flag). No filing text is shipped in this repo;
+running this for real requires your own network access and produces
+your own local copy of whatever filing you request.
+"""
+
+from __future__ import annotations
+
+import re
+
+import requests
+
+from .config import settings
+
+SEC_TICKER_LOOKUP_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
+
+
+class EdgarClientError(Exception):
+    """Raised when a real EDGAR API call fails or returns unexpected data."""
+
+
+def _headers() -> dict:
+    if not settings.sec_user_agent:
+        raise EdgarClientError(
+            "SEC_USER_AGENT is not set. SEC requires a descriptive User-Agent "
+            "identifying the requester (e.g. 'Jane Doe jane@example.com') for "
+            "all EDGAR API calls. Set it via the SEC_USER_AGENT env var."
+        )
+    return {"User-Agent": settings.sec_user_agent}
+
+
+def get_cik_for_ticker(ticker: str) -> str:
+    """Look up a company's 10-digit zero-padded CIK from its ticker symbol."""
+    resp = requests.get(SEC_TICKER_LOOKUP_URL, headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    ticker_upper = ticker.upper()
+    for entry in data.values():
+        if entry.get("ticker", "").upper() == ticker_upper:
+            return str(entry["cik_str"]).zfill(10)
+
+    raise EdgarClientError(f"No CIK found for ticker {ticker!r}")
+
+
+def get_latest_10k_filing(cik: str) -> dict:
+    """
+    Return metadata for the most recent 10-K filing: accession number,
+    primary document filename, and filing date.
+    """
+    url = SEC_SUBMISSIONS_URL.format(cik=cik)
+    resp = requests.get(url, headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    recent = data.get("filings", {}).get("recent", {})
+    forms = recent.get("form", [])
+    accession_numbers = recent.get("accessionNumber", [])
+    primary_documents = recent.get("primaryDocument", [])
+    filing_dates = recent.get("filingDate", [])
+
+    for i, form in enumerate(forms):
+        if form == "10-K":
+            return {
+                "accession_number": accession_numbers[i],
+                "primary_document": primary_documents[i],
+                "filing_date": filing_dates[i],
+            }
+
+    raise EdgarClientError(f"No 10-K filing found for CIK {cik}")
+
+
+def _strip_html(html: str) -> str:
+    """Minimal HTML-to-text: strip tags and collapse whitespace. Filings are
+    typically well-formed XBRL/HTML, so a full parser (BeautifulSoup) gives
+    cleaner results in production - this keeps the dependency footprint
+    small for the demo path."""
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def download_filing_text(cik: str, accession_number: str, primary_document: str) -> str:
+    """Download and return the plain-text content of a specific filing document."""
+    accession_no_dashes = accession_number.replace("-", "")
+    url = f"{SEC_ARCHIVES_BASE}/{int(cik)}/{accession_no_dashes}/{primary_document}"
+    resp = requests.get(url, headers=_headers(), timeout=15)
+    resp.raise_for_status()
+    return _strip_html(resp.text)
+
+
+def fetch_latest_10k(ticker: str) -> str:
+    """End-to-end: ticker -> CIK -> latest 10-K metadata -> filing text."""
+    cik = get_cik_for_ticker(ticker)
+    filing = get_latest_10k_filing(cik)
+    return download_filing_text(cik, filing["accession_number"], filing["primary_document"])

@@ -1,0 +1,488 @@
+﻿"""
+Real SEC EDGAR client.
+
+This hits the actual public SEC EDGAR APIs - no auth required, but SEC
+requires a descriptive User-Agent header identifying the requester
+(https://www.sec.gov/os/webmaster-faq#developers). Configure yours via
+the SEC_USER_AGENT environment variable before using this in a
+network-enabled environment.
+
+The client preserves structural boundaries from SEC HTML/XBRL filings so
+financial tables, segment disclosures, revenue rows, debt disclosures,
+and legal sections remain machine-readable.
+"""
+
+from __future__ import annotations
+
+import re
+
+import requests
+
+from .config import settings
+
+SEC_TICKER_LOOKUP_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
+
+
+class EdgarClientError(Exception):
+    """Raised when a real EDGAR API call fails or returns unexpected data."""
+
+
+def _headers() -> dict:
+    if not settings.sec_user_agent:
+        raise EdgarClientError(
+            "SEC_USER_AGENT is not set. SEC requires a descriptive User-Agent "
+            "identifying the requester (e.g. 'Jane Doe jane@example.com') "
+            "for all EDGAR API calls. Set it via the SEC_USER_AGENT env var."
+        )
+
+    return {"User-Agent": settings.sec_user_agent}
+
+
+def get_cik_for_ticker(ticker: str) -> str:
+    """Look up a company's 10-digit zero-padded CIK from its ticker symbol."""
+    resp = requests.get(
+        SEC_TICKER_LOOKUP_URL,
+        headers=_headers(),
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+
+    ticker_upper = ticker.upper()
+
+    for entry in data.values():
+        if entry.get("ticker", "").upper() == ticker_upper:
+            return str(entry["cik_str"]).zfill(10)
+
+    raise EdgarClientError(f"No CIK found for ticker {ticker!r}")
+
+
+def get_latest_10k_filing(cik: str) -> dict:
+    """
+    Return metadata for the most recent 10-K filing.
+
+    Returns accession number, primary document filename, and filing date.
+    """
+    url = SEC_SUBMISSIONS_URL.format(cik=cik)
+
+    resp = requests.get(
+        url,
+        headers=_headers(),
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+
+    recent = data.get("filings", {}).get("recent", {})
+
+    forms = recent.get("form", [])
+    accession_numbers = recent.get("accessionNumber", [])
+    primary_documents = recent.get("primaryDocument", [])
+    filing_dates = recent.get("filingDate", [])
+
+    for i, form in enumerate(forms):
+        if form == "10-K":
+            return {
+                "accession_number": accession_numbers[i],
+                "primary_document": primary_documents[i],
+                "filing_date": filing_dates[i],
+            }
+
+    raise EdgarClientError(f"No 10-K filing found for CIK {cik}")
+
+
+def _strip_html(html: str) -> str:
+    """
+    Convert SEC HTML to text while preserving financial table structure.
+
+    SEC filings contain important information inside HTML tables. A simple
+    regex such as ``re.sub(r"<[^>]+>", " ", html)`` destroys row and cell
+    boundaries and causes downstream extraction to associate numbers with
+    the wrong segment.
+
+    We therefore preserve:
+      - table rows
+      - table cells
+      - paragraphs
+      - headings
+      - line breaks
+
+    before removing the remaining HTML tags.
+    """
+
+    if not html:
+        return ""
+
+    text = html
+
+    # ------------------------------------------------------------
+    # Preserve row/paragraph boundaries before removing tags.
+    # ------------------------------------------------------------
+
+    text = re.sub(
+        r"</(?:tr|p|div|li|h[1-6]|section|article)>",
+        "\n",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # Preserve explicit line breaks.
+    text = re.sub(
+        r"<(?:br|hr)\s*/?>",
+        "\n",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # Preserve table-cell boundaries.
+    text = re.sub(
+        r"</?(?:td|th)[^>]*>",
+        " | ",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # ------------------------------------------------------------
+    # Remove remaining HTML/XML tags.
+    # ------------------------------------------------------------
+
+    text = re.sub(
+        r"<[^>]+>",
+        " ",
+        text,
+    )
+
+    # ------------------------------------------------------------
+    # Decode common SEC HTML entities.
+    # ------------------------------------------------------------
+
+    text = re.sub(
+        r"&#160;|&nbsp;",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"&#8211;|&ndash;",
+        "-",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"&#8212;|&mdash;",
+        "-",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"&#8217;|&rsquo;",
+        "'",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"&#8220;|&#8221;|&ldquo;|&rdquo;",
+        '"',
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # ------------------------------------------------------------
+    # Normalize whitespace while preserving rows.
+    # ------------------------------------------------------------
+
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text,
+    )
+
+    text = re.sub(
+        r" *\| *",
+        " | ",
+        text,
+    )
+
+    text = re.sub(
+        r"\n[ \t]+",
+        "\n",
+        text,
+    )
+
+    text = re.sub(
+        r"[ \t]+\n",
+        "\n",
+        text,
+    )
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
+
+    return text.strip()
+
+
+def download_filing_text(
+    cik: str,
+    accession_number: str,
+    primary_document: str,
+) -> str:
+    """
+    Download and return the plain-text content of a specific filing document.
+
+    The returned text retains financial table boundaries required by the
+    deterministic extraction layer.
+    """
+    accession_no_dashes = accession_number.replace("-", "")
+
+    url = (
+        f"{SEC_ARCHIVES_BASE}/"
+        f"{int(cik)}/"
+        f"{accession_no_dashes}/"
+        f"{primary_document}"
+    )
+
+    resp = requests.get(
+        url,
+        headers=_headers(),
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+    return _strip_html(resp.text)
+
+
+def get_10k_filing_for_fiscal_year(
+    cik: str,
+    fiscal_year: str,
+) -> dict:
+    """
+    Find the SEC 10-K whose reportDate belongs to the requested fiscal year.
+
+    Example:
+        FY2025 -> reportDate beginning with 2025
+
+    Returns accession number, primary document, filing date and report date.
+    """
+    match = re.search(
+        r"(20\d{2})",
+        fiscal_year,
+    )
+
+    if not match:
+        raise EdgarClientError(
+            f"Invalid fiscal year label: {fiscal_year!r}. "
+            "Expected e.g. FY2025."
+        )
+
+    target_year = match.group(1)
+
+    url = SEC_SUBMISSIONS_URL.format(cik=cik)
+
+    resp = requests.get(
+        url,
+        headers=_headers(),
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+
+    recent = data.get("filings", {}).get("recent", {})
+
+    forms = recent.get("form", [])
+    accession_numbers = recent.get("accessionNumber", [])
+    primary_documents = recent.get("primaryDocument", [])
+    filing_dates = recent.get("filingDate", [])
+    report_dates = recent.get("reportDate", [])
+
+    for i, form in enumerate(forms):
+        if form != "10-K":
+            continue
+
+        report_date = (
+            report_dates[i]
+            if i < len(report_dates)
+            else ""
+        )
+
+        if str(report_date).startswith(target_year):
+            return {
+                "accession_number": accession_numbers[i],
+                "primary_document": primary_documents[i],
+                "filing_date": filing_dates[i],
+                "report_date": report_date,
+            }
+
+    raise EdgarClientError(
+        f"No 10-K found for CIK {cik} with fiscal year {fiscal_year}."
+    )
+
+
+def fetch_10k_for_fiscal_year(
+    ticker: str,
+    fiscal_year: str,
+) -> str:
+    """
+    End-to-end historical SEC retrieval:
+
+    ticker
+        -> CIK
+        -> requested fiscal-year 10-K
+        -> filing text
+    """
+    cik = get_cik_for_ticker(ticker)
+
+    filing = get_10k_filing_for_fiscal_year(
+        cik,
+        fiscal_year,
+    )
+
+    return download_filing_text(
+        cik,
+        filing["accession_number"],
+        filing["primary_document"],
+    )
+
+
+def fetch_latest_10k(ticker: str) -> str:
+    """
+    End-to-end latest SEC 10-K retrieval:
+
+    ticker
+        -> CIK
+        -> latest 10-K metadata
+        -> real SEC filing text
+    """
+    cik = get_cik_for_ticker(ticker)
+
+    filing = get_latest_10k_filing(cik)
+
+    return download_filing_text(
+        cik,
+        filing["accession_number"],
+        filing["primary_document"],
+    )
+def resolve_company_to_ticker(company_or_ticker: str) -> str:
+    """
+    Resolve a user-entered public-company name or ticker to the SEC ticker.
+
+    Uses the SEC's live company_tickers.json dataset. Matching is issuer-aware:
+    multiple SEC securities belonging to the same CIK are treated as one issuer,
+    with preference for the primary/common ticker.
+    """
+    query = " ".join(company_or_ticker.strip().split()).casefold()
+
+    if not query:
+        raise EdgarClientError("Company name or ticker cannot be empty.")
+
+    resp = requests.get(
+        SEC_TICKER_LOOKUP_URL,
+        headers=_headers(),
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+
+    entries = [
+        {
+            "ticker": str(entry.get("ticker", "")).strip().upper(),
+            "title": " ".join(str(entry.get("title", "")).split()),
+            "cik": str(entry.get("cik_str", "")).strip(),
+        }
+        for entry in data.values()
+        if str(entry.get("ticker", "")).strip()
+        and str(entry.get("title", "")).strip()
+        and str(entry.get("cik_str", "")).strip()
+    ]
+
+    # Exact ticker always wins.
+    for entry in entries:
+        if entry["ticker"].casefold() == query:
+            return entry["ticker"]
+
+    def normalize_name(value: str) -> str:
+        value = value.casefold().replace("&", " and ")
+        value = re.sub(r"[^a-z0-9]+", " ", value)
+        value = re.sub(
+            r"\b(the)\b",
+            " ",
+            value,
+        )
+        value = re.sub(
+            r"\b(incorporated|inc|corporation|corp|company|co|"
+            r"limited|ltd|plc|holdings|holding|llc|lp)\b",
+            " ",
+            value,
+        )
+        return re.sub(r"\s+", " ", value).strip()
+
+    normalized_query = normalize_name(query)
+
+    # Exact issuer-name match after normalization.
+    exact = [
+        entry for entry in entries
+        if normalize_name(entry["title"]) == normalized_query
+    ]
+
+    def preferred_ticker(group: list[dict]) -> str:
+        # Prefer conventional common-stock tickers over preferred/security
+        # variants. This prevents ORCL-PD from winning over ORCL.
+        def score(entry: dict) -> tuple:
+            ticker = entry["ticker"]
+            return (
+                0 if "-" in ticker else 1,
+                0 if "." not in ticker else 1,
+                -len(ticker),
+                ticker,
+            )
+
+        return sorted(group, key=score, reverse=True)[0]["ticker"]
+
+    # Collapse duplicate securities belonging to the same issuer/CIK.
+    exact_by_cik: dict[str, list[dict]] = {}
+    for entry in exact:
+        exact_by_cik.setdefault(entry["cik"], []).append(entry)
+
+    if len(exact_by_cik) == 1:
+        return preferred_ticker(next(iter(exact_by_cik.values())))
+
+    # Conservative token containment for names such as:
+    # "Coca-Cola Company" -> "COCA COLA CO"
+    query_tokens = set(normalized_query.split())
+
+    containing = []
+    for entry in entries:
+        title_normalized = normalize_name(entry["title"])
+        title_tokens = set(title_normalized.split())
+
+        if (
+            query_tokens
+            and query_tokens.issubset(title_tokens)
+            and len(normalized_query) >= 3
+        ):
+            containing.append(entry)
+
+    containing_by_cik: dict[str, list[dict]] = {}
+    for entry in containing:
+        containing_by_cik.setdefault(entry["cik"], []).append(entry)
+
+    if len(containing_by_cik) == 1:
+        return preferred_ticker(next(iter(containing_by_cik.values())))
+
+    raise EdgarClientError(
+        f"No unique SEC public-company match found for "
+        f"{company_or_ticker!r}"
+    )
+

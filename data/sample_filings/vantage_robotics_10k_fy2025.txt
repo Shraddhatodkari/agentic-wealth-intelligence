@@ -1,0 +1,35 @@
+VANTAGE ROBOTICS, INC.
+FORM 10-K
+For the Fiscal Year Ended December 31, 2025
+
+(NOTE: Vantage Robotics, Inc. is a fictional company created for
+demonstration purposes. This filing is synthetic and does not represent
+any real business or financial data.)
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Consolidated revenue for fiscal year 2025 was $412 million, a decline of
+11% compared to $463 million in fiscal year 2024. The decline was
+primarily driven by our Industrial Automation segment, which fell 19%
+year-over-year to $260 million amid reduced capital spending by
+manufacturing customers. Our Service & Maintenance segment grew 4%
+year-over-year to $152 million, partially offsetting the decline.
+
+ITEM 7A. QUANTITATIVE AND QUALITATIVE DISCLOSURES ABOUT MARKET RISK
+
+Our credit agreement requires us to maintain a maximum leverage ratio
+(total debt to EBITDA) of 4.0x. As of December 31, 2025, our leverage
+ratio was 4.3x, in breach of the covenant limit; the Company has
+obtained a temporary waiver from its lenders while it pursues an
+amendment to the credit agreement. Our credit agreement also requires a
+minimum interest coverage ratio of 2.0x; we reported 1.6x for the
+period, also below the required minimum and subject to the same waiver.
+
+ITEM 3. LEGAL PROCEEDINGS
+
+The Company is a defendant in a breach-of-contract action brought by a
+former customer alleging failure to deliver contracted automation
+equipment on schedule. The plaintiff seeks damages of approximately $18
+million. The Company disputes the claims and intends to defend
+vigorously; based on information currently available, no reasonable
+estimate of loss can be made at this time.

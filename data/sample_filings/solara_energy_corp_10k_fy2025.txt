@@ -1,0 +1,30 @@
+SOLARA ENERGY CORP.
+FORM 10-K
+For the Fiscal Year Ended December 31, 2025
+
+(NOTE: Solara Energy Corp is a fictional company created for
+demonstration purposes. This filing is synthetic and does not represent
+any real business or financial data.)
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Consolidated revenue for fiscal year 2025 was $1.24 billion, an increase
+of 28% compared to $969 million in fiscal year 2024. Growth was led by
+our Utility-Scale Solar segment, which grew 34% year-over-year to $780
+million as demand for grid-scale renewable capacity accelerated. Our
+Residential Solar segment grew 19% year-over-year to $340 million. Our
+Storage Systems segment grew 22% year-over-year to $120 million.
+
+ITEM 7A. QUANTITATIVE AND QUALITATIVE DISCLOSURES ABOUT MARKET RISK
+
+Our credit agreement requires us to maintain a maximum leverage ratio
+(total debt to EBITDA) of 3.0x. As of December 31, 2025, our leverage
+ratio was 1.8x, well within the covenant limit. Our credit agreement
+also requires a minimum interest coverage ratio of 3.0x; we reported
+5.2x for the period, a substantial improvement from the prior year's
+4.1x, reflecting strong earnings growth outpacing debt service costs.
+
+ITEM 3. LEGAL PROCEEDINGS
+
+The Company is not currently subject to any material legal proceedings
+outside the ordinary course of business.
