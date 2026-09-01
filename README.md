@@ -1,4 +1,4 @@
-﻿# Agentic Wealth Intelligence
+# Agentic Wealth Intelligence
 
 ![Tests](https://github.com/Shraddhatodkari/agentic-wealth-intelligence/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
@@ -222,7 +222,7 @@ See [`.github/workflows/`](.github/workflows/).
 
 ## Design decisions worth knowing
 
-- **Mock-mode by default, everywhere.** LLM calls, the SEC EDGAR client,
+- **Tests use mock/offline mode; live analysis uses real SEC EDGAR data and can use Ollama locally.** LLM calls, the SEC EDGAR client,
   Redis cache backend, and Celery task queue all have offline-testable
   mock paths â€” the entire system is tested without any external service
   running.
